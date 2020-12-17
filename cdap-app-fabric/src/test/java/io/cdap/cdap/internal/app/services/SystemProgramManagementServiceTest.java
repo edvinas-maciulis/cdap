@@ -21,6 +21,8 @@ import io.cdap.cdap.AllProgramsApp;
 import io.cdap.cdap.api.artifact.ArtifactScope;
 import io.cdap.cdap.api.artifact.ArtifactSummary;
 import io.cdap.cdap.app.runtime.Arguments;
+import io.cdap.cdap.app.runtime.ProgramRuntimeService;
+import io.cdap.cdap.common.conf.CConfiguration;
 import io.cdap.cdap.common.id.Id;
 import io.cdap.cdap.common.io.Locations;
 import io.cdap.cdap.common.test.AppJarHelper;
@@ -50,7 +52,7 @@ import java.util.Map;
  */
 public class SystemProgramManagementServiceTest extends AppFabricTestBase {
 
-  private static SystemProgramManagementService programManagementService;
+  private static SystemProgramManagementService progmMgmtSvc;
   private static ProgramLifecycleService programLifecycleService;
   private static ApplicationLifecycleService applicationLifecycleService;
   private static LocationFactory locationFactory;
@@ -64,11 +66,13 @@ public class SystemProgramManagementServiceTest extends AppFabricTestBase {
 
   @BeforeClass
   public static void setup() {
-    programManagementService = getInjector().getInstance(SystemProgramManagementService.class);
     programLifecycleService = getInjector().getInstance(ProgramLifecycleService.class);
     applicationLifecycleService = getInjector().getInstance(ApplicationLifecycleService.class);
     locationFactory = getInjector().getInstance(LocationFactory.class);
     artifactRepository = getInjector().getInstance(ArtifactRepository.class);
+    progmMgmtSvc = new SystemProgramManagementService(getInjector().getInstance(CConfiguration.class),
+                                                      getInjector().getInstance(ProgramRuntimeService.class),
+                                                      programLifecycleService);
   }
 
   @AfterClass
@@ -85,14 +89,14 @@ public class SystemProgramManagementServiceTest extends AppFabricTestBase {
     ProgramId programId = new ProgramId(applicationId, ProgramType.SERVICE, PROGRAM_NAME);
     Map<ProgramId, Arguments> enabledServices = new HashMap<>();
     enabledServices.put(programId, new BasicArguments(new HashMap<>()));
-    programManagementService.setProgramsEnabled(enabledServices);
+    progmMgmtSvc.setProgramsEnabled(enabledServices);
     //run one iteration of programManagementService. The program should start
-    programManagementService.runTask();
+    progmMgmtSvc.runTask();
     waitState(programId, ProgramStatus.RUNNING.name());
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 1);
     //Remove this app as an enabled service , program should stop
-    programManagementService.setProgramsEnabled(new HashMap<>());
-    programManagementService.runTask();
+    progmMgmtSvc.setProgramsEnabled(new HashMap<>());
+    progmMgmtSvc.runTask();
     waitState(programId, ProgramStatus.STOPPED.name());
     Assert.assertEquals(ProgramStatus.STOPPED.name(), getProgramStatus(programId));
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 0);
@@ -100,8 +104,8 @@ public class SystemProgramManagementServiceTest extends AppFabricTestBase {
     programLifecycleService.start(programId, new HashMap<>(), false);
     programLifecycleService.start(programId, new HashMap<>(), false);
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 2);
-    programManagementService.setProgramsEnabled(enabledServices);
-    programManagementService.runTask();
+    progmMgmtSvc.setProgramsEnabled(enabledServices);
+    progmMgmtSvc.runTask();
     assertProgramRuns(programId, ProgramRunStatus.KILLED, 2);
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 1);
   }
