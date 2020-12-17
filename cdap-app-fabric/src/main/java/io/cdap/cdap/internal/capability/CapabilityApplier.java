@@ -16,8 +16,11 @@
 
 package io.cdap.cdap.internal.capability;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.gson.Gson;
 import com.google.inject.Inject;
+import io.cdap.cdap.api.metadata.MetadataEntity;
+import io.cdap.cdap.api.metadata.MetadataScope;
 import io.cdap.cdap.api.retry.RetryableException;
 import io.cdap.cdap.app.runtime.Arguments;
 import io.cdap.cdap.common.ApplicationNotFoundException;
@@ -38,18 +41,26 @@ import io.cdap.cdap.proto.ProgramType;
 import io.cdap.cdap.proto.id.ApplicationId;
 import io.cdap.cdap.proto.id.NamespaceId;
 import io.cdap.cdap.proto.id.ProgramId;
+import io.cdap.cdap.proto.metadata.MetadataSearchResponse;
+import io.cdap.cdap.proto.metadata.MetadataSearchResultRecord;
 import io.cdap.cdap.security.spi.authorization.UnauthorizedException;
+import io.cdap.cdap.spi.metadata.SearchRequest;
+import org.apache.twill.discovery.DiscoveryServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 /**
  * Class that applies capabilities
@@ -60,6 +71,8 @@ public class CapabilityApplier {
   private static final Gson GSON = new Gson();
   private static final int RETRY_LIMIT = 5;
   private static final int RETRY_DELAY = 5;
+  private static final String CAPABILITY = "capability:%s";
+  private static final String APPLICATION = "application";
   private static final ProgramTerminator NOOP_PROGRAM_TERMINATOR = programId -> {
     // no-op
   };
@@ -69,18 +82,20 @@ public class CapabilityApplier {
   private final NamespaceAdmin namespaceAdmin;
   private final CapabilityReader capabilityReader;
   private final CapabilityWriter capabilityWriter;
+  private final MetadataSearchClient metadataSearchClient;
 
   @Inject
   CapabilityApplier(CConfiguration cConf, SystemProgramManagementService systemProgramManagementService,
                     ApplicationLifecycleService applicationLifecycleService, NamespaceAdmin namespaceAdmin,
-                    ProgramLifecycleService programLifecycleService, CapabilityReader capabilityChecker,
-                    CapabilityWriter capabilityWriter) {
+                    ProgramLifecycleService programLifecycleService, CapabilityReader capabilityReader,
+                    CapabilityWriter capabilityWriter, DiscoveryServiceClient discoveryClient) {
     this.systemProgramManagementService = systemProgramManagementService;
     this.applicationLifecycleService = applicationLifecycleService;
     this.programLifecycleService = programLifecycleService;
-    this.capabilityReader = capabilityChecker;
+    this.capabilityReader = capabilityReader;
     this.capabilityWriter = capabilityWriter;
     this.namespaceAdmin = namespaceAdmin;
+    this.metadataSearchClient = new MetadataSearchClient(discoveryClient);
   }
 
   /**
@@ -88,16 +103,15 @@ public class CapabilityApplier {
    *
    * @param capabilityConfigs
    */
-  public void apply(List<CapabilityConfig> capabilityConfigs) throws Exception {
+  public void apply(Collection<? extends CapabilityConfig> capabilityConfigs) throws Exception {
     List<CapabilityConfig> newConfigs = new ArrayList<>(capabilityConfigs);
     Set<CapabilityConfig> enableSet = new HashSet<>();
     Set<CapabilityConfig> disableSet = new HashSet<>();
     Set<CapabilityConfig> deleteSet = new HashSet<>();
     Map<String, CapabilityStatusRecord> currentCapabilities = capabilityReader.getAllCapabilities().stream().collect(
-      Collectors.toMap(CapabilityStatusRecord::getCapability, capabilityStatusRecord -> capabilityStatusRecord));
+      Collectors.toMap(CapabilityStatusRecord::getCapability, Function.identity()));
     Map<String, CapabilityOperationRecord> currentOperations = capabilityReader.getCapabilityOperations().stream()
-      .collect(Collectors.toMap(CapabilityOperationRecord::getCapability,
-                                capabilityOperationRecord -> capabilityOperationRecord));
+      .collect(Collectors.toMap(CapabilityOperationRecord::getCapability, Function.identity()));
     for (CapabilityConfig newConfig : newConfigs) {
       String capability = newConfig.getCapability();
       if (currentOperations.containsKey(capability)) {
@@ -281,15 +295,15 @@ public class CapabilityApplier {
       int offset = 0;
       int limit = 100;
       NamespaceId namespaceId = namespaceMeta.getNamespaceId();
-      EntityResult<ApplicationId> results = capabilityReader.getApplications(namespaceId, capability, null,
-                                                                             offset, limit);
+      EntityResult<ApplicationId> results = getApplications(namespaceId, capability, null,
+                                                            offset, limit);
       while (!results.getEntities().isEmpty()) {
         //call consumer for each entity
         for (ApplicationId entity : results.getEntities()) {
           consumer.accept(entity);
         }
         offset += limit;
-        results = capabilityReader.getApplications(namespaceId, capability, results.getCursor(), offset, limit);
+        results = getApplications(namespaceId, capability, results.getCursor(), offset, limit);
       }
     }
   }
@@ -347,5 +361,42 @@ public class CapabilityApplier {
   @FunctionalInterface
   public interface CheckedConsumer<T> {
     void accept(T t) throws Exception;
+  }
+
+  @VisibleForTesting
+  EntityResult<ApplicationId> getApplications(NamespaceId namespace, String capability, @Nullable String cursor,
+                                              int offset, int limit) throws IOException {
+    String capabilityTag = String.format(CAPABILITY, capability);
+    SearchRequest searchRequest = SearchRequest.of(capabilityTag)
+      .addNamespace(namespace.getNamespace())
+      .addType(APPLICATION)
+      .setScope(MetadataScope.SYSTEM)
+      .setCursor(cursor)
+      .setOffset(offset)
+      .setLimit(limit)
+      .build();
+    MetadataSearchResponse searchResponse = metadataSearchClient.search(searchRequest);
+    Set<ApplicationId> applicationIds = searchResponse.getResults().stream()
+      .map(MetadataSearchResultRecord::getMetadataEntity)
+      .map(this::getApplicationId)
+      .collect(Collectors.toSet());
+    return new EntityResult<>(applicationIds, getCursorResponse(searchResponse),
+                              searchResponse.getOffset(), searchResponse.getLimit(),
+                              searchResponse.getTotal());
+  }
+
+  @Nullable
+  private String getCursorResponse(MetadataSearchResponse searchResponse) {
+    List<String> cursors = searchResponse.getCursors();
+    if (cursors == null || cursors.isEmpty()) {
+      return null;
+    }
+    return cursors.get(0);
+  }
+
+  private ApplicationId getApplicationId(MetadataEntity metadataEntity) {
+    return new ApplicationId(metadataEntity.getValue(MetadataEntity.NAMESPACE),
+                             metadataEntity.getValue(MetadataEntity.APPLICATION),
+                             metadataEntity.getValue(MetadataEntity.VERSION));
   }
 }

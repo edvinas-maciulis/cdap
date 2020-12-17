@@ -97,7 +97,6 @@ import io.cdap.cdap.security.impersonation.SecurityUtil;
 import io.cdap.cdap.security.spi.authentication.AuthenticationContext;
 import io.cdap.cdap.security.spi.authorization.AuthorizationEnforcer;
 import io.cdap.cdap.spi.metadata.MetadataMutation;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -230,7 +229,7 @@ public class ApplicationLifecycleService extends AbstractIdleService {
     for (Map.Entry<ApplicationId, ApplicationSpecification> entry : appSpecs.entrySet()) {
       ApplicationDetail applicationDetail = ApplicationDetail.fromSpec(entry.getValue(), owners.get(entry.getKey()));
       try {
-        capabilityReader.ensureApplicationEnabled(namespace.getNamespace(), applicationDetail.getName());
+        ensureApplicationEnabled(entry.getValue());
       } catch (CapabilityNotAvailableException ex) {
         LOG.debug("Application {} is ignored due to exception.", applicationDetail.getName(), ex);
         continue;
@@ -240,6 +239,18 @@ public class ApplicationLifecycleService extends AbstractIdleService {
       }
     }
     return result;
+  }
+
+  private void ensureApplicationEnabled(ApplicationSpecification appSpec) throws IOException,
+    CapabilityNotAvailableException {
+    for (Map.Entry<String, Plugin> pluginEntry : appSpec.getPlugins().entrySet()) {
+      Set<String> capabilities = pluginEntry.getValue().getPluginClass().getRequirements().getCapabilities();
+      for (String capability : capabilities) {
+        if (!capabilityReader.isEnabled(capability)) {
+          throw new CapabilityNotAvailableException(capability);
+        }
+      }
+    }
   }
 
   /**

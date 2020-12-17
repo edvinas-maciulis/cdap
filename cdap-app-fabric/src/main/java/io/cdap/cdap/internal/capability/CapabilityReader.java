@@ -16,10 +16,6 @@
 
 package io.cdap.cdap.internal.capability;
 
-import io.cdap.cdap.internal.entity.EntityResult;
-import io.cdap.cdap.proto.id.ApplicationId;
-import io.cdap.cdap.proto.id.NamespaceId;
-
 import java.io.IOException;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -72,28 +68,4 @@ public interface CapabilityReader {
    * @throws IOException
    */
   List<CapabilityOperationRecord> getCapabilityOperations() throws IOException;
-
-  /**
-   * Return applications that is associated with the capability
-   *
-   * @param namespace
-   * @param capability
-   * @param cursor
-   * @param offset
-   * @param limit
-   * @return
-   * @throws IOException
-   */
-  EntityResult<ApplicationId> getApplications(NamespaceId namespace, String capability, @Nullable String cursor,
-                                              int offset, int limit) throws IOException;
-
-  /**
-   * Throws an exception if application is associated with disabled capability
-   *
-   * @param namespace
-   * @param appNameWithCapability
-   */
-  void ensureApplicationEnabled(String namespace, String appNameWithCapability)
-    throws IOException, CapabilityNotAvailableException;
-
 }

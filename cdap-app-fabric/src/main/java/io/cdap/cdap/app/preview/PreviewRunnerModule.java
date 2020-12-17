@@ -43,7 +43,6 @@ import io.cdap.cdap.internal.app.namespace.StorageProviderNamespaceAdmin;
 import io.cdap.cdap.internal.app.preview.DefaultDataTracerFactory;
 import io.cdap.cdap.internal.app.preview.DefaultPreviewRunner;
 import io.cdap.cdap.internal.app.preview.MessagingPreviewDataPublisher;
-import io.cdap.cdap.internal.app.preview.NoopCapabilityReader;
 import io.cdap.cdap.internal.app.runtime.ProgramRuntimeProviderLoader;
 import io.cdap.cdap.internal.app.runtime.artifact.ArtifactRepository;
 import io.cdap.cdap.internal.app.runtime.artifact.ArtifactRepositoryReader;
@@ -56,6 +55,7 @@ import io.cdap.cdap.internal.app.runtime.workflow.BasicWorkflowStateWriter;
 import io.cdap.cdap.internal.app.runtime.workflow.WorkflowStateWriter;
 import io.cdap.cdap.internal.app.store.DefaultStore;
 import io.cdap.cdap.internal.capability.CapabilityReader;
+import io.cdap.cdap.internal.capability.CapabilityStatusStore;
 import io.cdap.cdap.internal.pipeline.SynchronousPipelineFactory;
 import io.cdap.cdap.messaging.MessagingService;
 import io.cdap.cdap.metadata.DefaultMetadataAdmin;
@@ -197,7 +197,7 @@ public class PreviewRunnerModule extends PrivateModule {
     bind(PreferencesFetcher.class).toProvider(preferencesFetcherProvider);
     expose(PreferencesFetcher.class);
 
-    bind(CapabilityReader.class).to(NoopCapabilityReader.class);
+    bind(CapabilityReader.class).to(CapabilityStatusStore.class);
   }
 
   /**

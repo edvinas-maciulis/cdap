@@ -306,12 +306,20 @@ public final class AppFabricServiceRuntimeModule extends RuntimeModule {
       bind(ProfileService.class).in(Scopes.SINGLETON);
       bind(ProgramLifecycleService.class).in(Scopes.SINGLETON);
       bind(SystemAppManagementService.class).in(Scopes.SINGLETON);
-      bind(CapabilityApplier.class).in(Scopes.SINGLETON);
-      bind(CapabilityStatusStore.class).in(Scopes.SINGLETON);
-      bind(CapabilityReader.class).to(CapabilityStatusStore.class);
-      bind(CapabilityWriter.class).to(CapabilityStatusStore.class);
-      bind(SystemProgramManagementService.class).in(Scopes.SINGLETON);
-      bind(CapabilityManagementService.class).in(Scopes.SINGLETON);
+      install(new PrivateModule() {
+        @Override
+        protected void configure() {
+          bind(CapabilityApplier.class).in(Scopes.SINGLETON);
+          bind(CapabilityStatusStore.class).in(Scopes.SINGLETON);
+          bind(CapabilityReader.class).to(CapabilityStatusStore.class);
+          bind(CapabilityWriter.class).to(CapabilityStatusStore.class);
+          bind(SystemProgramManagementService.class).in(Scopes.SINGLETON);
+          bind(CapabilityManagementService.class).in(Scopes.SINGLETON);
+          expose(CapabilityManagementService.class);
+          expose(CapabilityReader.class);
+          expose(CapabilityWriter.class);
+        }
+      });
       bind(OwnerAdmin.class).to(DefaultOwnerAdmin.class);
       bind(CoreSchedulerService.class).in(Scopes.SINGLETON);
       bind(Scheduler.class).to(CoreSchedulerService.class);

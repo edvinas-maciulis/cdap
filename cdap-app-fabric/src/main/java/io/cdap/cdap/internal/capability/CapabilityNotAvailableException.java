@@ -16,13 +16,21 @@
 
 package io.cdap.cdap.internal.capability;
 
+import io.cdap.cdap.api.common.HttpErrorStatusProvider;
+
+import java.net.HttpURLConnection;
+
 /**
  * CapabilityNotAvailableException indicating that the capability is disabled
  */
-public class CapabilityNotAvailableException extends Exception {
+public class CapabilityNotAvailableException extends Exception implements HttpErrorStatusProvider {
 
   public CapabilityNotAvailableException(String capability) {
     super(String.format("Capability %s is not enabled.", capability));
   }
-  
+
+  @Override
+  public int getStatusCode() {
+    return HttpURLConnection.HTTP_FORBIDDEN;
+  }
 }

@@ -16,10 +16,10 @@
 
 package io.cdap.cdap.internal.capability;
 
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
-import javax.annotation.Nullable;
 
 /**
  * Configuration for applying an action for a capability
@@ -32,13 +32,14 @@ public class CapabilityConfig {
   private final List<SystemApplication> applications;
   private final List<SystemProgram> programs;
 
-  public CapabilityConfig(String label, String status, String capability,
-                          @Nullable List<SystemApplication> applications, @Nullable List<SystemProgram> programs) {
+  public CapabilityConfig(String label, CapabilityStatus status, String capability,
+                          Collection<? extends SystemApplication> applications,
+                          Collection<? extends SystemProgram> programs) {
     this.label = label;
-    this.status = CapabilityStatus.valueOf(status);
+    this.status = status;
     this.capability = capability;
-    this.applications = (applications == null) ? Collections.emptyList() : applications;
-    this.programs = (programs == null) ? Collections.emptyList() : programs;
+    this.applications = new ArrayList<>(applications);
+    this.programs = new ArrayList<>(programs);
   }
 
   /**
@@ -66,9 +67,6 @@ public class CapabilityConfig {
    * @return {@link List} of {@link SystemApplication} for this capability. Could be null.
    */
   public List<SystemApplication> getApplications() {
-    if (applications == null) {
-      return Collections.emptyList();
-    }
     return applications;
   }
 
@@ -76,9 +74,6 @@ public class CapabilityConfig {
    * @return {@link List} of {@link SystemProgram} for this capability.
    */
   public List<SystemProgram> getPrograms() {
-    if (programs == null) {
-      return Collections.emptyList();
-    }
     return programs;
   }
 

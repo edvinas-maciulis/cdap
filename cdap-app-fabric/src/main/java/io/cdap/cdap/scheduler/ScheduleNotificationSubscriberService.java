@@ -34,8 +34,6 @@ import io.cdap.cdap.internal.app.runtime.schedule.queue.JobQueueTable;
 import io.cdap.cdap.internal.app.runtime.schedule.store.ProgramScheduleStoreDataset;
 import io.cdap.cdap.internal.app.runtime.schedule.store.Schedulers;
 import io.cdap.cdap.internal.app.services.AbstractNotificationSubscriberService;
-import io.cdap.cdap.internal.capability.CapabilityNotAvailableException;
-import io.cdap.cdap.internal.capability.CapabilityReader;
 import io.cdap.cdap.messaging.MessagingService;
 import io.cdap.cdap.proto.Notification;
 import io.cdap.cdap.proto.ProgramRunStatus;
@@ -71,21 +69,18 @@ public class ScheduleNotificationSubscriberService extends AbstractIdleService {
   private final MessagingService messagingService;
   private final MetricsCollectionService metricsCollectionService;
   private final List<Service> subscriberServices;
-  private final CapabilityReader capabilityReader;
   private ScheduledExecutorService subscriberExecutor;
 
   @Inject
   ScheduleNotificationSubscriberService(CConfiguration cConf, MessagingService messagingService,
                                         MetricsCollectionService metricsCollectionService,
-                                        TransactionRunner transactionRunner,
-                                        CapabilityReader capabilityReader) {
+                                        TransactionRunner transactionRunner) {
     this.cConf = cConf;
     this.messagingService = messagingService;
     this.metricsCollectionService = metricsCollectionService;
     this.subscriberServices = Arrays.asList(new SchedulerEventSubscriberService(transactionRunner),
                                             new DataEventSubscriberService(transactionRunner),
                                             new ProgramStatusEventSubscriberService(transactionRunner));
-    this.capabilityReader = capabilityReader;
   }
 
   @Override
@@ -204,14 +199,6 @@ public class ScheduleNotificationSubscriberService extends AbstractIdleService {
         scheduleId = ScheduleId.fromString(scheduleIdString);
       }
 
-      try {
-        capabilityReader.ensureApplicationEnabled(scheduleId.getNamespace(), scheduleId.getApplication());
-      } catch (CapabilityNotAvailableException ex) {
-        LOG.debug("Schedule {} ignored for Application {}.{} due to exception.", scheduleId.getSchedule(),
-                  scheduleId.getNamespace(), scheduleId.getApplication(), ex);
-        return;
-      }
-
       ProgramScheduleRecord record;
       try {
         record = scheduleStore.getScheduleRecord(scheduleId);
@@ -280,14 +267,6 @@ public class ScheduleNotificationSubscriberService extends AbstractIdleService {
       }
 
       ProgramRunId programRunId = GSON.fromJson(programRunIdString, ProgramRunId.class);
-      try {
-        capabilityReader
-          .ensureApplicationEnabled(programRunId.getNamespaceId().getNamespace(), programRunId.getApplication());
-      } catch (CapabilityNotAvailableException ex) {
-        LOG.debug("Schedule ignored for program {} due to exception.", programRunId.getProgram(), ex);
-        return;
-      }
-
       ProgramId programId = programRunId.getParent();
       String triggerKeyForProgramStatus = Schedulers.triggerKeyForProgramStatus(programId, programStatus);
 

@@ -28,6 +28,7 @@ import com.google.inject.Inject;
 import io.cdap.cdap.api.ProgramSpecification;
 import io.cdap.cdap.api.annotation.Name;
 import io.cdap.cdap.api.app.ApplicationSpecification;
+import io.cdap.cdap.api.plugin.Plugin;
 import io.cdap.cdap.app.guice.ClusterMode;
 import io.cdap.cdap.app.program.ProgramDescriptor;
 import io.cdap.cdap.app.runtime.LogLevelUpdater;
@@ -53,6 +54,7 @@ import io.cdap.cdap.internal.app.runtime.ProgramOptionConstants;
 import io.cdap.cdap.internal.app.runtime.SimpleProgramOptions;
 import io.cdap.cdap.internal.app.runtime.SystemArguments;
 import io.cdap.cdap.internal.app.store.RunRecordDetail;
+import io.cdap.cdap.internal.capability.CapabilityNotAvailableException;
 import io.cdap.cdap.internal.capability.CapabilityReader;
 import io.cdap.cdap.internal.pipeline.PluginRequirement;
 import io.cdap.cdap.internal.profile.ProfileService;
@@ -487,7 +489,6 @@ public class ProgramLifecycleService {
    * @throws Exception
    */
   public void stopAll(ApplicationId applicationId) throws Exception {
-    Set<RunId> runs = new HashSet<>();
     Map<ProgramRunId, RunRecordDetail> runMap = store.getActiveRuns(applicationId);
     for (ProgramRunId programRunId : runMap.keySet()) {
       stop(programRunId.getParent(), programRunId.getRun());
@@ -510,13 +511,15 @@ public class ProgramLifecycleService {
    * @throws ProfileConflictException if the profile is disabled
    */
   public RunId runInternal(ProgramId programId, Map<String, String> userArgs, Map<String, String> sysArgs,
-                           boolean debug) throws NotFoundException, IOException, ConflictException {
+                           boolean debug) throws NotFoundException, IOException, ConflictException,
+    CapabilityNotAvailableException {
     RunId runId = RunIds.generate();
     ProgramOptions programOptions = createProgramOptions(programId, userArgs, sysArgs, debug);
     ProgramDescriptor programDescriptor = store.loadProgram(programId);
     String userId = SecurityRequestContext.getUserId();
     userId = userId == null ? "" : userId;
 
+    checkCapability(programDescriptor);
     synchronized (this) {
       if (maxConcurrentRuns > 0 && maxConcurrentRuns <= store.countActiveRuns(maxConcurrentRuns)) {
         ConflictException e = new ConflictException(
@@ -588,7 +591,6 @@ public class ProgramLifecycleService {
    */
   public ProgramController start(ProgramId programId, Map<String, String> overrides, boolean debug) throws Exception {
     authorizationEnforcer.enforce(programId, authenticationContext.getPrincipal(), Action.EXECUTE);
-    capabilityReader.ensureApplicationEnabled(programId.getNamespace(), programId.getApplication());
     checkConcurrentExecution(programId);
 
     Map<String, String> sysArgs = propertiesResolver.getSystemProperties(programId);
@@ -607,8 +609,23 @@ public class ProgramLifecycleService {
     ProgramDescriptor programDescriptor = store.loadProgram(programId);
     ProgramRunId programRunId = programId.run(RunIds.generate());
 
+    checkCapability(programDescriptor);
+
     programStateWriter.start(programRunId, options, null, programDescriptor);
     return startInternal(programDescriptor, options, programRunId);
+  }
+
+  private void checkCapability(ProgramDescriptor programDescriptor) throws IOException,
+    CapabilityNotAvailableException {
+    for (Map.Entry<String, Plugin> pluginEntry : programDescriptor.getApplicationSpecification().getPlugins()
+      .entrySet()) {
+      Set<String> capabilities = pluginEntry.getValue().getPluginClass().getRequirements().getCapabilities();
+      for (String capability : capabilities) {
+        if (!capabilityReader.isEnabled(capability)) {
+          throw new CapabilityNotAvailableException(capability);
+        }
+      }
+    }
   }
 
   /**

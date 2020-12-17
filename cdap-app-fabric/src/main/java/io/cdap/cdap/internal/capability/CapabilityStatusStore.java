@@ -19,13 +19,6 @@ package io.cdap.cdap.internal.capability;
 import com.google.gson.Gson;
 import com.google.inject.Inject;
 import io.cdap.cdap.api.dataset.lib.CloseableIterator;
-import io.cdap.cdap.api.metadata.MetadataEntity;
-import io.cdap.cdap.api.metadata.MetadataScope;
-import io.cdap.cdap.internal.entity.EntityResult;
-import io.cdap.cdap.proto.id.ApplicationId;
-import io.cdap.cdap.proto.id.NamespaceId;
-import io.cdap.cdap.proto.metadata.MetadataSearchResponse;
-import io.cdap.cdap.proto.metadata.MetadataSearchResultRecord;
 import io.cdap.cdap.spi.data.StructuredRow;
 import io.cdap.cdap.spi.data.StructuredTable;
 import io.cdap.cdap.spi.data.table.field.Field;
@@ -33,9 +26,7 @@ import io.cdap.cdap.spi.data.table.field.Fields;
 import io.cdap.cdap.spi.data.table.field.Range;
 import io.cdap.cdap.spi.data.transaction.TransactionRunner;
 import io.cdap.cdap.spi.data.transaction.TransactionRunners;
-import io.cdap.cdap.spi.metadata.SearchRequest;
 import io.cdap.cdap.store.StoreDefinition;
-import org.apache.twill.discovery.DiscoveryServiceClient;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -43,26 +34,17 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
-import javax.annotation.Nullable;
 
 /**
  * CapabilityStatusStore which takes care of reading , writing capability status and provides additional helpful methods
  */
 public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter {
 
-  private static final String CAPABILITY = "capability:%s";
-  private static final String CAPABILITY_KEY = "capability";
-  private static final String APPLICATION = "application";
-  private static final String APPLICATION_TAG = "application:%s";
   private static final Gson GSON = new Gson();
-  private final MetadataSearchClient metadataSearchClient;
   private final TransactionRunner transactionRunner;
 
   @Inject
-  CapabilityStatusStore(DiscoveryServiceClient discoveryClient, TransactionRunner transactionRunner) {
-    this.metadataSearchClient = new MetadataSearchClient(discoveryClient);
+  CapabilityStatusStore(TransactionRunner transactionRunner) {
     this.transactionRunner = transactionRunner;
   }
 
@@ -141,38 +123,6 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
   }
 
   /**
-   * Returns the list of applications that are having metadata tagged with the capability
-   *
-   * @param namespace  Namespace for which applications should be listed
-   * @param capability Capability by which to filter
-   * @param cursor     Optional cursor from a previous response
-   * @param offset     Offset from where to start
-   * @param limit      Limit of records to fetch
-   * @return
-   * @throws IOException - Exception from meta data search if any
-   */
-  public EntityResult<ApplicationId> getApplications(NamespaceId namespace, String capability, @Nullable String cursor,
-                                                     int offset, int limit) throws IOException {
-    String capabilityTag = String.format(CAPABILITY, capability);
-    SearchRequest searchRequest = SearchRequest.of(capabilityTag)
-      .addNamespace(namespace.getNamespace())
-      .addType(APPLICATION)
-      .setScope(MetadataScope.SYSTEM)
-      .setCursor(cursor)
-      .setOffset(offset)
-      .setLimit(limit)
-      .build();
-    MetadataSearchResponse searchResponse = metadataSearchClient.search(searchRequest);
-    Set<ApplicationId> applicationIds = searchResponse.getResults().stream()
-      .map(MetadataSearchResultRecord::getMetadataEntity)
-      .map(this::getApplicationId)
-      .collect(Collectors.toSet());
-    return new EntityResult<>(applicationIds, getCursorResponse(searchResponse),
-                              searchResponse.getOffset(), searchResponse.getLimit(),
-                              searchResponse.getTotal());
-  }
-
-  /**
    * Add or update capability
    *
    * @param capability
@@ -230,48 +180,5 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
       fields.add(Fields.stringField(StoreDefinition.CapabilitiesStore.NAME_FIELD, capability));
       capabilityTable.delete(fields);
     }, IOException.class);
-  }
-
-  /**
-   * Returns boolean indicating whether application is disabled due to a disabled capability
-   *
-   * @param namespace
-   * @param applicationName
-   * @throws IOException
-   */
-  public void ensureApplicationEnabled(String namespace, String applicationName)
-    throws IOException, CapabilityNotAvailableException {
-    String applicationQuery = String.format(APPLICATION_TAG, applicationName);
-    SearchRequest searchRequest = SearchRequest.of(applicationQuery)
-      .addNamespace(namespace)
-      .addType(APPLICATION)
-      .setScope(MetadataScope.SYSTEM)
-      .build();
-    Set<MetadataSearchResultRecord> results = metadataSearchClient.search(searchRequest).getResults();
-    for (MetadataSearchResultRecord metadataRecord : results) {
-      String capability = metadataRecord.getMetadata().get(MetadataScope.SYSTEM).getProperties()
-        .get(CAPABILITY_KEY);
-      if (capability == null || capability.isEmpty()) {
-        continue;
-      }
-      if (!isEnabled(capability)) {
-        throw new CapabilityNotAvailableException(capability);
-      }
-    }
-  }
-
-  @Nullable
-  private String getCursorResponse(MetadataSearchResponse searchResponse) {
-    List<String> cursors = searchResponse.getCursors();
-    if (cursors == null || cursors.isEmpty()) {
-      return null;
-    }
-    return cursors.get(0);
-  }
-
-  private ApplicationId getApplicationId(MetadataEntity metadataEntity) {
-    return new ApplicationId(metadataEntity.getValue(MetadataEntity.NAMESPACE),
-                             metadataEntity.getValue(MetadataEntity.APPLICATION),
-                             metadataEntity.getValue(MetadataEntity.VERSION));
   }
 }
