@@ -64,7 +64,7 @@ import javax.annotation.Nullable;
 /**
  * Class that applies capabilities
  */
-public class CapabilityApplier {
+class CapabilityApplier {
 
   private static final Logger LOG = LoggerFactory.getLogger(CapabilityApplier.class);
   private static final Gson GSON = new Gson();
@@ -195,7 +195,7 @@ public class CapabilityApplier {
       capabilityStatusStore
         .addOrUpdateCapability(capabilityConfig.getCapability(), CapabilityStatus.DISABLED, capabilityConfig);
       //stop all the programs having capability metadata. Services will be stopped by SystemProgramManagementService
-      stopAllProgramsWithMetadata(capability);
+      stopAllProgramsWithCapability(capability);
       capabilityStatusStore.deleteCapabilityOperation(capability);
       LOG.debug("Disabled capability {}", capability);
     }
@@ -214,7 +214,7 @@ public class CapabilityApplier {
       LOG.debug("Deleting capability {}", capability);
       if (existingConfig.getStatus() == CapabilityStatus.ENABLED) {
         //stop all the programs having capability metadata.
-        stopAllProgramsWithMetadata(capability);
+        stopAllProgramsWithCapability(capability);
       }
       //remove all applications having capability metadata.
       deleteAllAppsWithCapability(capability);
@@ -244,7 +244,7 @@ public class CapabilityApplier {
     doForAllAppsWithCapability(capability, this::deleteAppWithRetry);
   }
 
-  private void stopAllProgramsWithMetadata(String capability) throws Exception {
+  private void stopAllProgramsWithCapability(String capability) throws Exception {
     doForAllAppsWithCapability(capability, this::stopAllRunningProgramsForApp);
   }
 
