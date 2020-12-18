@@ -43,6 +43,7 @@ import io.cdap.cdap.proto.ProgramType;
 import io.cdap.cdap.proto.id.ApplicationId;
 import io.cdap.cdap.proto.id.NamespaceId;
 import io.cdap.cdap.proto.id.ProgramId;
+import io.cdap.cdap.spi.data.transaction.TransactionRunner;
 import org.apache.twill.filesystem.Location;
 import org.apache.twill.filesystem.LocationFactory;
 import org.junit.AfterClass;
@@ -61,6 +62,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * Test for CapabilityManagementService
+ */
 public class CapabilityManagementServiceTest extends AppFabricTestBase {
 
   private static ArtifactRepository artifactRepository;
@@ -69,8 +73,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
   private static CapabilityManagementService capabilityManagementService;
   private static ApplicationLifecycleService applicationLifecycleService;
   private static ProgramLifecycleService programLifecycleService;
-  private static CapabilityWriter capabilityWriter;
-  private static CapabilityReader capabilityReader;
+  private static CapabilityStatusStore capabilityStatusStore;
   private static final Gson GSON = new Gson();
 
   @BeforeClass
@@ -79,8 +82,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     artifactRepository = getInjector().getInstance(ArtifactRepository.class);
     cConfiguration = getInjector().getInstance(CConfiguration.class);
     capabilityManagementService = getInjector().getInstance(CapabilityManagementService.class);
-    capabilityWriter = getInjector().getInstance(CapabilityWriter.class);
-    capabilityReader = getInjector().getInstance(CapabilityReader.class);
+    capabilityStatusStore = new CapabilityStatusStore(getInjector().getInstance(TransactionRunner.class));
     applicationLifecycleService = getInjector().getInstance(ApplicationLifecycleService.class);
     programLifecycleService = getInjector().getInstance(ProgramLifecycleService.class);
   }
@@ -121,14 +123,14 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     //insert a pending entry, this should get re-applied and enable the capability
     FileReader fileReader = new FileReader(testJson);
     CapabilityConfig capabilityConfig = GSON.fromJson(fileReader, CapabilityConfig.class);
-    capabilityWriter.addOrUpdateCapabilityOperation("cap1", CapabilityAction.ENABLE, capabilityConfig);
+    capabilityStatusStore.addOrUpdateCapabilityOperation("cap1", CapabilityAction.ENABLE, capabilityConfig);
     capabilityManagementService.runTask();
-    Assert.assertTrue(capabilityReader.isEnabled("cap1"));
-    Assert.assertTrue(capabilityReader.getCapabilityOperations().isEmpty());
+    Assert.assertTrue(capabilityStatusStore.isEnabled("cap1"));
+    Assert.assertTrue(capabilityStatusStore.getCapabilityOperations().isEmpty());
 
     //pending task out of the way , on next run should be deleted
     capabilityManagementService.runTask();
-    Assert.assertFalse(capabilityReader.isEnabled("cap1"));
+    Assert.assertFalse(capabilityStatusStore.isEnabled("cap1"));
 
     //disable from delete and see if it is applied correctly
     CapabilityConfig disableConfig = new CapabilityConfig(capabilityConfig.getLabel(), CapabilityStatus.DISABLED,
@@ -137,13 +139,13 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
                                                           capabilityConfig.getPrograms());
     writeConfigAsFile(externalConfigPath, fileName, disableConfig);
     capabilityManagementService.runTask();
-    Assert.assertFalse(capabilityReader.isEnabled("cap1"));
-    Assert.assertEquals(disableConfig, capabilityReader.getConfig("cap1"));
+    Assert.assertFalse(capabilityStatusStore.isEnabled("cap1"));
+    Assert.assertEquals(disableConfig, capabilityStatusStore.getConfig("cap1"));
 
     //enable again
     writeConfigAsFile(externalConfigPath, fileName, capabilityConfig);
     capabilityManagementService.runTask();
-    Assert.assertTrue(capabilityReader.isEnabled("cap1"));
+    Assert.assertTrue(capabilityStatusStore.isEnabled("cap1"));
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 1);
 
     //cleanup
@@ -187,7 +189,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     Assert.assertFalse(appList.isEmpty());
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 1);
     String capability = config.getCapability();
-    Assert.assertTrue(capabilityReader.isEnabled(capability));
+    Assert.assertTrue(capabilityStatusStore.isEnabled(capability));
 
     //disable capability. Program should stop, status should be disabled and app should still be present.
     CapabilityConfig disabledConfig = changeConfigStatus(config, CapabilityStatus.DISABLED);
@@ -195,14 +197,14 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     capabilityManagementService.runTask();
     assertProgramRuns(programId, ProgramRunStatus.KILLED, 1);
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 0);
-    Assert.assertFalse(capabilityReader.isEnabled(capability));
+    Assert.assertFalse(capabilityStatusStore.isEnabled(capability));
     appList = getAppList(namespace);
     Assert.assertFalse(appList.isEmpty());
 
     //delete capability. Program should stop, status should be disabled and app should still be present.
     new File(externalConfigPath, disabledConfig.getCapability()).delete();
     capabilityManagementService.runTask();
-    Assert.assertNull(capabilityReader.getStatus(capability));
+    Assert.assertNull(capabilityStatusStore.getStatus(capability));
     appList = getAppList(namespace);
     Assert.assertTrue(appList.isEmpty());
     artifactRepository.deleteArtifact(Id.Artifact
@@ -220,9 +222,16 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     Requirements declaredAnnotation = appWithWorkflowClass.getDeclaredAnnotation(Requirements.class);
     //verify this app has capabilities
     Assert.assertTrue(declaredAnnotation.capabilities().length > 0);
+    Assert.assertFalse(capabilityStatusStore.isEnabled(declaredAnnotation.capabilities()[0]));
     String appNameWithCapability = appWithWorkflowClass.getSimpleName() + UUID.randomUUID();
+    deployTestArtifact(Id.Namespace.DEFAULT.getId(), appNameWithCapability, testVersion, appWithWorkflowClass);
     try {
-      deployArtifactAndApp(appWithWorkflowClass, appNameWithCapability, testVersion);
+      //deploy app
+      Id.Artifact artifactId = Id.Artifact.from(Id.Namespace.DEFAULT, appNameWithCapability, testVersion);
+      applicationLifecycleService
+        .deployApp(NamespaceId.DEFAULT, appNameWithCapability, testVersion, artifactId,
+                   null, programId -> {
+          });
       Assert.fail("Expecting exception");
     } catch (CapabilityNotAvailableException ex) {
       //expected
@@ -287,7 +296,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     writeConfigAsFile(externalConfigPath, enabledConfig.getCapability(), enabledConfig);
     capabilityManagementService.runTask();
     String capability = enabledConfig.getCapability();
-    Assert.assertTrue(capabilityReader.isEnabled(capability));
+    Assert.assertTrue(capabilityStatusStore.isEnabled(capability));
 
     //deploy an app with this capability and start a workflow
     ApplicationId applicationId = new ApplicationId(namespace, appName);
@@ -312,7 +321,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     capabilityManagementService.runTask();
     assertProgramRuns(programId, ProgramRunStatus.KILLED, 1);
     assertProgramRuns(programId, ProgramRunStatus.RUNNING, 0);
-    Assert.assertFalse(capabilityReader.isEnabled(capability));
+    Assert.assertFalse(capabilityStatusStore.isEnabled(capability));
     //try starting programs
     for (ProgramDescriptor program : programs) {
       try {
@@ -323,7 +332,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
     }
     new File(externalConfigPath, capability).delete();
     capabilityManagementService.runTask();
-    Assert.assertNull(capabilityReader.getStatus(capability));
+    Assert.assertNull(capabilityStatusStore.getStatus(capability));
     artifactRepository.deleteArtifact(Id.Artifact
                                         .from(new Id.Namespace(namespace), appName, version));
   }
@@ -349,8 +358,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
   }
 
   void deployTestArtifact(String namespace, String appName, String version, Class<?> appClass) throws Exception {
-    Id.Artifact artifactId = Id.Artifact
-      .from(Id.Namespace.from(namespace), appName, version);
+    Id.Artifact artifactId = Id.Artifact.from(Id.Namespace.from(namespace), appName, version);
     Location appJar = AppJarHelper.createDeploymentJar(locationFactory, appClass);
     File appJarFile = new File(tmpFolder.newFolder(),
                                String.format("%s-%s.jar", artifactId.getName(), artifactId.getVersion().getVersion()));
@@ -360,8 +368,7 @@ public class CapabilityManagementServiceTest extends AppFabricTestBase {
   }
 
   private void deployArtifactAndApp(Class<?> applicationClass, String appName, String testVersion) throws Exception {
-    Id.Artifact artifactId = Id.Artifact
-      .from(Id.Namespace.DEFAULT, appName, testVersion);
+    Id.Artifact artifactId = Id.Artifact.from(Id.Namespace.DEFAULT, appName, testVersion);
     Location appJar = AppJarHelper.createDeploymentJar(locationFactory, applicationClass);
     File appJarFile = new File(tmpFolder.newFolder(),
                                String.format("%s-%s.jar", artifactId.getName(), artifactId.getVersion().getVersion()));

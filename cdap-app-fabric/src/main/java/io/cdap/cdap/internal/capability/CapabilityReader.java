@@ -17,6 +17,7 @@
 package io.cdap.cdap.internal.capability;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import javax.annotation.Nullable;
 
@@ -44,6 +45,14 @@ public interface CapabilityReader {
   boolean isEnabled(String capability) throws IOException;
 
   /**
+   * Throws {@link CapabilityNotAvailableException} if all capabilities are not enabled
+   * @param capabilities
+   * @return
+   * @throws IOException
+   */
+  void checkAllEnabled(Collection<String> capabilities) throws IOException, CapabilityNotAvailableException;
+
+  /**
    * Get the configuration for this capability if present
    *
    * @param capability
@@ -60,12 +69,4 @@ public interface CapabilityReader {
    * @throws IOException
    */
   List<CapabilityStatusRecord> getAllCapabilities() throws IOException;
-
-  /**
-   * Returns all the capability operations
-   *
-   * @return
-   * @throws IOException
-   */
-  List<CapabilityOperationRecord> getCapabilityOperations() throws IOException;
 }

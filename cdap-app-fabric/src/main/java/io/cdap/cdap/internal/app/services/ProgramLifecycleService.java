@@ -620,11 +620,7 @@ public class ProgramLifecycleService {
     for (Map.Entry<String, Plugin> pluginEntry : programDescriptor.getApplicationSpecification().getPlugins()
       .entrySet()) {
       Set<String> capabilities = pluginEntry.getValue().getPluginClass().getRequirements().getCapabilities();
-      for (String capability : capabilities) {
-        if (!capabilityReader.isEnabled(capability)) {
-          throw new CapabilityNotAvailableException(capability);
-        }
-      }
+      capabilityReader.checkAllEnabled(capabilities);
     }
   }
 

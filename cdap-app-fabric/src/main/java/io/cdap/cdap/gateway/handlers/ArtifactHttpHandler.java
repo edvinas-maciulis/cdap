@@ -470,14 +470,6 @@ public class ArtifactHttpHandler extends AbstractHttpHandler {
     }
   }
 
-  private void ensurePluginEnabled(PluginClass pluginClass) throws CapabilityNotAvailableException, IOException {
-    for (String capability : pluginClass.getRequirements().getCapabilities()) {
-      if (!capabilityReader.isEnabled(capability)) {
-        throw new CapabilityNotAvailableException(capability);
-      }
-    }
-  }
-
   @GET
   @Path("/namespaces/{namespace-id}/artifacts/{artifact-name}/versions/{artifact-version}/extensions/{plugin-type}")
   public void getArtifactPlugins(HttpRequest request, HttpResponder responder,
@@ -503,7 +495,7 @@ public class ArtifactHttpHandler extends AbstractHttpHandler {
 
         for (PluginClass pluginClass : pluginsEntry.getValue()) {
           try {
-            ensurePluginEnabled(pluginClass);
+            capabilityReader.checkAllEnabled(pluginClass.getRequirements().getCapabilities());
           } catch (CapabilityNotAvailableException e) {
             LOG.debug("Skipping plugin {} because of disabled capability", pluginClass, e);
             continue;
@@ -571,7 +563,7 @@ public class ArtifactHttpHandler extends AbstractHttpHandler {
 
         PluginClass pluginClass = pluginsEntry.getValue();
         try {
-          ensurePluginEnabled(pluginClass);
+          capabilityReader.checkAllEnabled(pluginClass.getRequirements().getCapabilities());
         } catch (CapabilityNotAvailableException e) {
           LOG.debug("Skipping plugin {} because of disabled capability", pluginClass, e);
           continue;

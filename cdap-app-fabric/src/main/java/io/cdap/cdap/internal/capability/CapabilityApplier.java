@@ -21,7 +21,6 @@ import com.google.gson.Gson;
 import com.google.inject.Inject;
 import io.cdap.cdap.api.metadata.MetadataEntity;
 import io.cdap.cdap.api.metadata.MetadataScope;
-import io.cdap.cdap.api.retry.RetryableException;
 import io.cdap.cdap.app.runtime.Arguments;
 import io.cdap.cdap.common.ApplicationNotFoundException;
 import io.cdap.cdap.common.ArtifactNotFoundException;
@@ -80,20 +79,18 @@ public class CapabilityApplier {
   private final ApplicationLifecycleService applicationLifecycleService;
   private final ProgramLifecycleService programLifecycleService;
   private final NamespaceAdmin namespaceAdmin;
-  private final CapabilityReader capabilityReader;
-  private final CapabilityWriter capabilityWriter;
+  private final CapabilityStatusStore capabilityStatusStore;
   private final MetadataSearchClient metadataSearchClient;
 
   @Inject
   CapabilityApplier(CConfiguration cConf, SystemProgramManagementService systemProgramManagementService,
                     ApplicationLifecycleService applicationLifecycleService, NamespaceAdmin namespaceAdmin,
-                    ProgramLifecycleService programLifecycleService, CapabilityReader capabilityReader,
-                    CapabilityWriter capabilityWriter, DiscoveryServiceClient discoveryClient) {
+                    ProgramLifecycleService programLifecycleService, CapabilityStatusStore capabilityStatusStore,
+                    DiscoveryServiceClient discoveryClient) {
     this.systemProgramManagementService = systemProgramManagementService;
     this.applicationLifecycleService = applicationLifecycleService;
     this.programLifecycleService = programLifecycleService;
-    this.capabilityReader = capabilityReader;
-    this.capabilityWriter = capabilityWriter;
+    this.capabilityStatusStore = capabilityStatusStore;
     this.namespaceAdmin = namespaceAdmin;
     this.metadataSearchClient = new MetadataSearchClient(discoveryClient);
   }
@@ -108,9 +105,9 @@ public class CapabilityApplier {
     Set<CapabilityConfig> enableSet = new HashSet<>();
     Set<CapabilityConfig> disableSet = new HashSet<>();
     Set<CapabilityConfig> deleteSet = new HashSet<>();
-    Map<String, CapabilityStatusRecord> currentCapabilities = capabilityReader.getAllCapabilities().stream().collect(
-      Collectors.toMap(CapabilityStatusRecord::getCapability, Function.identity()));
-    Map<String, CapabilityOperationRecord> currentOperations = capabilityReader.getCapabilityOperations().stream()
+    Map<String, CapabilityStatusRecord> currentCapabilities = capabilityStatusStore.getAllCapabilities().stream()
+      .collect(Collectors.toMap(CapabilityStatusRecord::getCapability, Function.identity()));
+    Map<String, CapabilityOperationRecord> currentOperations = capabilityStatusStore.getCapabilityOperations().stream()
       .collect(Collectors.toMap(CapabilityOperationRecord::getCapability, Function.identity()));
     for (CapabilityConfig newConfig : newConfigs) {
       String capability = newConfig.getCapability();
@@ -163,12 +160,12 @@ public class CapabilityApplier {
       capabilityConfig.getPrograms().forEach(systemProgram -> enabledPrograms
         .put(getProgramId(systemProgram), new BasicArguments(systemProgram.getArgs())));
       String capability = capabilityConfig.getCapability();
-      CapabilityConfig existingConfig = capabilityReader.getConfig(capability);
+      CapabilityConfig existingConfig = capabilityStatusStore.getConfig(capability);
       if (capabilityConfig.equals(existingConfig)) {
-        capabilityWriter.deleteCapabilityOperation(capability);
+        capabilityStatusStore.deleteCapabilityOperation(capability);
         continue;
       }
-      capabilityWriter.addOrUpdateCapabilityOperation(capability, CapabilityAction.ENABLE, capabilityConfig);
+      capabilityStatusStore.addOrUpdateCapabilityOperation(capability, CapabilityAction.ENABLE, capabilityConfig);
       LOG.debug("Enabling capability {}", capability);
       //If already deployed, will be ignored
       deployAllSystemApps(capability, capabilityConfig.getApplications());
@@ -178,9 +175,9 @@ public class CapabilityApplier {
     //mark all as enabled
     for (CapabilityConfig capabilityConfig : enableSet) {
       String capability = capabilityConfig.getCapability();
-      capabilityWriter
+      capabilityStatusStore
         .addOrUpdateCapability(capability, CapabilityStatus.ENABLED, capabilityConfig);
-      capabilityWriter.deleteCapabilityOperation(capability);
+      capabilityStatusStore.deleteCapabilityOperation(capability);
       LOG.debug("Enabled capability {}", capability);
     }
   }
@@ -188,18 +185,18 @@ public class CapabilityApplier {
   private void disableCapabilities(Set<CapabilityConfig> disableSet) throws Exception {
     for (CapabilityConfig capabilityConfig : disableSet) {
       String capability = capabilityConfig.getCapability();
-      CapabilityConfig existingConfig = capabilityReader.getConfig(capability);
+      CapabilityConfig existingConfig = capabilityStatusStore.getConfig(capability);
       if (capabilityConfig.equals(existingConfig)) {
-        capabilityWriter.deleteCapabilityOperation(capability);
+        capabilityStatusStore.deleteCapabilityOperation(capability);
         continue;
       }
-      capabilityWriter.addOrUpdateCapabilityOperation(capability, CapabilityAction.DISABLE, capabilityConfig);
+      capabilityStatusStore.addOrUpdateCapabilityOperation(capability, CapabilityAction.DISABLE, capabilityConfig);
       LOG.debug("Disabling capability {}", capability);
-      capabilityWriter
+      capabilityStatusStore
         .addOrUpdateCapability(capabilityConfig.getCapability(), CapabilityStatus.DISABLED, capabilityConfig);
       //stop all the programs having capability metadata. Services will be stopped by SystemProgramManagementService
       stopAllProgramsWithMetadata(capability);
-      capabilityWriter.deleteCapabilityOperation(capability);
+      capabilityStatusStore.deleteCapabilityOperation(capability);
       LOG.debug("Disabled capability {}", capability);
     }
   }
@@ -207,27 +204,27 @@ public class CapabilityApplier {
   private void deleteCapabilities(Set<CapabilityConfig> deleteSet) throws Exception {
     for (CapabilityConfig capabilityConfig : deleteSet) {
       String capability = capabilityConfig.getCapability();
-      CapabilityConfig existingConfig = capabilityReader.getConfig(capability);
+      CapabilityConfig existingConfig = capabilityStatusStore.getConfig(capability);
       //already deleted
       if (existingConfig == null) {
-        capabilityWriter.deleteCapabilityOperation(capability);
+        capabilityStatusStore.deleteCapabilityOperation(capability);
         continue;
       }
-      capabilityWriter.addOrUpdateCapabilityOperation(capability, CapabilityAction.DELETE, capabilityConfig);
+      capabilityStatusStore.addOrUpdateCapabilityOperation(capability, CapabilityAction.DELETE, capabilityConfig);
       LOG.debug("Deleting capability {}", capability);
       if (existingConfig.getStatus() == CapabilityStatus.ENABLED) {
         //stop all the programs having capability metadata.
         stopAllProgramsWithMetadata(capability);
       }
       //remove all applications having capability metadata.
-      deleteAllAppsWithMetadata(capability);
+      deleteAllAppsWithCapability(capability);
       //remove deployments of system applications
       for (SystemApplication application : capabilityConfig.getApplications()) {
         ApplicationId applicationId = getApplicationId(application);
         deleteAppWithRetry(applicationId);
       }
-      capabilityWriter.deleteCapability(capability);
-      capabilityWriter.deleteCapabilityOperation(capability);
+      capabilityStatusStore.deleteCapability(capability);
+      capabilityStatusStore.deleteCapabilityOperation(capability);
       LOG.debug("Deleted capability {}", capability);
     }
   }
@@ -243,12 +240,12 @@ public class CapabilityApplier {
     return new ProgramId(applicationId, ProgramType.valueOf(program.getType().toUpperCase()), program.getName());
   }
 
-  private void deleteAllAppsWithMetadata(String capability) throws Exception {
-    doForAllAppsWithMetadata(capability, this::deleteAppWithRetry);
+  private void deleteAllAppsWithCapability(String capability) throws Exception {
+    doForAllAppsWithCapability(capability, this::deleteAppWithRetry);
   }
 
   private void stopAllProgramsWithMetadata(String capability) throws Exception {
-    doForAllAppsWithMetadata(capability, this::stopAllRunningProgramsForApp);
+    doForAllAppsWithCapability(capability, this::stopAllRunningProgramsForApp);
   }
 
   private void deployAllSystemApps(String capability, List<SystemApplication> applications) throws Exception {
@@ -264,20 +261,15 @@ public class CapabilityApplier {
   private void retryableDeployApp(SystemApplication application) throws Exception {
     ApplicationId applicationId = getApplicationId(application);
     LOG.debug("Deploying app {}", applicationId);
-    try {
-      if (isAppDeployed(applicationId)) {
-        //Already deployed.
-        LOG.debug("Application {} is already deployed", applicationId);
-        return;
-      }
-      String configString = application.getConfig() == null ? null : GSON.toJson(application.getConfig());
-      applicationLifecycleService
-        .deployApp(applicationId.getParent(), applicationId.getApplication(), applicationId.getVersion(),
-                   application.getArtifact(), configString, NOOP_PROGRAM_TERMINATOR, null, null);
-    } catch (Exception ex) {
-      checkForRetry(ex);
-      throw new RetryableException(ex);
+    if (isAppDeployed(applicationId)) {
+      //Already deployed.
+      LOG.debug("Application {} is already deployed", applicationId);
+      return;
     }
+    String configString = application.getConfig() == null ? null : GSON.toJson(application.getConfig());
+    applicationLifecycleService
+      .deployApp(applicationId.getParent(), applicationId.getApplication(), applicationId.getVersion(),
+                 application.getArtifact(), configString, NOOP_PROGRAM_TERMINATOR, null, null);
   }
 
   private boolean isAppDeployed(ApplicationId applicationId) throws Exception {
@@ -290,7 +282,7 @@ public class CapabilityApplier {
   }
 
   //Find all applications for capability and call consumer for each
-  private void doForAllAppsWithMetadata(String capability, CheckedConsumer<ApplicationId> consumer) throws Exception {
+  private void doForAllAppsWithCapability(String capability, CheckedConsumer<ApplicationId> consumer) throws Exception {
     for (NamespaceMeta namespaceMeta : namespaceAdmin.list()) {
       int offset = 0;
       int limit = 100;
@@ -310,47 +302,27 @@ public class CapabilityApplier {
 
   private void stopAllRunningProgramsForApp(ApplicationId applicationId) {
     try {
-      doWithRetry(applicationId, this::retryableStopRunningPrograms);
+      doWithRetry(applicationId, programLifecycleService::stopAll);
     } catch (Exception ex) {
       LOG.error("Stopping programs for application {} failed with {}", applicationId, ex);
     }
   }
 
-  private void retryableStopRunningPrograms(ApplicationId applicationId) throws Exception {
-    try {
-      programLifecycleService.stopAll(applicationId);
-    } catch (Exception ex) {
-      checkForRetry(ex);
-      throw new RetryableException(ex);
-    }
-  }
-
   private void deleteAppWithRetry(ApplicationId applicationId) throws Exception {
-    doWithRetry(applicationId, this::retryableDeleteApp);
-  }
-
-  private void retryableDeleteApp(ApplicationId applicationId) throws Exception {
-    try {
-      applicationLifecycleService.removeApplication(applicationId);
-    } catch (Exception ex) {
-      checkForRetry(ex);
-      throw new RetryableException(ex);
-    }
+    doWithRetry(applicationId, applicationLifecycleService::removeApplication);
   }
 
   private <T> void doWithRetry(T argument, CheckedConsumer<T> consumer) throws Exception {
     Retries.callWithRetries(() -> {
       consumer.accept(argument);
       return null;
-    }, RetryStrategies.limit(RETRY_LIMIT, RetryStrategies.fixDelay(RETRY_DELAY, TimeUnit.SECONDS)));
+    }, RetryStrategies.limit(RETRY_LIMIT, RetryStrategies.fixDelay(RETRY_DELAY, TimeUnit.SECONDS)), this::shouldRetry);
   }
 
-  private void checkForRetry(Exception exception) throws Exception {
-    if (exception instanceof UnauthorizedException ||
-      exception instanceof InvalidArtifactException ||
-      exception instanceof ArtifactNotFoundException) {
-      throw exception;
-    }
+  private boolean shouldRetry(Throwable throwable) {
+    return !(throwable instanceof UnauthorizedException ||
+      throwable instanceof InvalidArtifactException ||
+      throwable instanceof ArtifactNotFoundException);
   }
 
   /**

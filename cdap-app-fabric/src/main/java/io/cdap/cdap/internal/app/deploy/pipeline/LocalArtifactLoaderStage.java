@@ -31,7 +31,6 @@ import io.cdap.cdap.internal.app.deploy.InMemoryConfigurator;
 import io.cdap.cdap.internal.app.deploy.LocalApplicationManager;
 import io.cdap.cdap.internal.app.runtime.artifact.ArtifactRepository;
 import io.cdap.cdap.internal.app.runtime.artifact.PluginFinder;
-import io.cdap.cdap.internal.capability.CapabilityNotAvailableException;
 import io.cdap.cdap.internal.capability.CapabilityReader;
 import io.cdap.cdap.pipeline.AbstractStage;
 import io.cdap.cdap.pipeline.Context;
@@ -134,11 +133,7 @@ public class LocalArtifactLoaderStage extends AbstractStage<AppDeploymentInfo> {
     authorizationEnforcer.enforce(applicationId, authenticationContext.getPrincipal(), Action.ADMIN);
     for (Map.Entry<String, Plugin> pluginEntry : specification.getPlugins().entrySet()) {
       Set<String> capabilities = pluginEntry.getValue().getPluginClass().getRequirements().getCapabilities();
-      for (String capability : capabilities) {
-        if (!capabilityReader.isEnabled(capability)) {
-          throw new CapabilityNotAvailableException(capability);
-        }
-      }
+      capabilityReader.checkAllEnabled(capabilities);
     }
     emit(new ApplicationDeployable(deploymentInfo.getArtifactId(), deploymentInfo.getArtifactLocation(),
                                    applicationId, specification, store.getApplication(applicationId),

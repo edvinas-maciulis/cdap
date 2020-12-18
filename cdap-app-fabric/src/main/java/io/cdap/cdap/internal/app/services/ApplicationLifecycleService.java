@@ -245,11 +245,7 @@ public class ApplicationLifecycleService extends AbstractIdleService {
     CapabilityNotAvailableException {
     for (Map.Entry<String, Plugin> pluginEntry : appSpec.getPlugins().entrySet()) {
       Set<String> capabilities = pluginEntry.getValue().getPluginClass().getRequirements().getCapabilities();
-      for (String capability : capabilities) {
-        if (!capabilityReader.isEnabled(capability)) {
-          throw new CapabilityNotAvailableException(capability);
-        }
-      }
+      capabilityReader.checkAllEnabled(capabilities);
     }
   }
 
@@ -918,12 +914,7 @@ public class ApplicationLifecycleService extends AbstractIdleService {
       throw new InvalidArtifactException(String.format("No application class found in artifact '%s' in namespace '%s'.",
                                                        artifactDetail.getDescriptor().getArtifactId(), namespaceId));
     }
-    Set<String> capabilities = appClass.getRequirements().getCapabilities();
-    for (String capability : capabilities) {
-      if (!capabilityReader.isEnabled(capability)) {
-        throw new CapabilityNotAvailableException(capability);
-      }
-    }
+    capabilityReader.checkAllEnabled(appClass.getRequirements().getCapabilities());
     // deploy application with newly added artifact
     AppDeploymentInfo deploymentInfo = new AppDeploymentInfo(artifactDetail.getDescriptor(), namespaceId,
                                                              appClass, appName, appVersion,

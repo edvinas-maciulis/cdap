@@ -48,6 +48,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Tests for CapabilityApplier
+ */
 public class CapabilityApplierTest extends AppFabricTestBase {
 
   private static ApplicationLifecycleService applicationLifecycleService;
@@ -65,7 +68,7 @@ public class CapabilityApplierTest extends AppFabricTestBase {
     artifactRepository = getInjector().getInstance(ArtifactRepository.class);
     CConfiguration cConfiguration = getInjector().getInstance(CConfiguration.class);
     DiscoveryServiceClient client = getInjector().getInstance(DiscoveryServiceClient.class);
-    capabilityApplier = new CapabilityApplier(cConfiguration, null, null, null, null, null, null, client);
+    capabilityApplier = new CapabilityApplier(cConfiguration, null, null, null, null, null, client);
   }
 
   @AfterClass
@@ -122,6 +125,9 @@ public class CapabilityApplierTest extends AppFabricTestBase {
     applicationLifecycleService.removeApplication(NamespaceId.DEFAULT.app(appNameWithoutCapability, TEST_VERSION));
     artifactRepository.deleteArtifact(
       Id.Artifact.from(new Id.Namespace(NamespaceId.DEFAULT.getNamespace()), appNameWithoutCapability, TEST_VERSION));
+    for (String capability : declaredAnnotation.capabilities()) {
+      capabilityWriter.deleteCapability(capability);
+    }
   }
 
   @Test
@@ -162,6 +168,9 @@ public class CapabilityApplierTest extends AppFabricTestBase {
       Id.Artifact.from(new Id.Namespace(NamespaceId.DEFAULT.getNamespace()), appNameWithCapability1, TEST_VERSION));
     artifactRepository.deleteArtifact(
       Id.Artifact.from(new Id.Namespace(NamespaceId.DEFAULT.getNamespace()), appNameWithCapability2, TEST_VERSION));
+    for (String capability1 : declaredAnnotation.capabilities()) {
+      capabilityWriter.deleteCapability(capability1);
+    }
   }
 
   private void deployArtifactAndApp(Class<?> applicationClass, String appName) throws Exception {

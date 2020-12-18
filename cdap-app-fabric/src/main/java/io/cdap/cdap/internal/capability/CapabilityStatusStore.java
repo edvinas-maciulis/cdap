@@ -72,6 +72,15 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
   }
 
   @Override
+  public void checkAllEnabled(Collection<String> capabilities) throws IOException, CapabilityNotAvailableException {
+    for (String capability : capabilities) {
+      if (!isEnabled(capability)) {
+        throw new CapabilityNotAvailableException(capability);
+      }
+    }
+  }
+
+  @Override
   public CapabilityConfig getConfig(String capability) throws IOException {
     return TransactionRunners.run(transactionRunner, context -> {
       StructuredTable capabilityTable = context.getTable(StoreDefinition.CapabilitiesStore.CAPABILITIES);
@@ -103,7 +112,12 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
     }, IOException.class);
   }
 
-  @Override
+  /**
+   * Returns list of all capability operations
+   *
+   * @return
+   * @throws IOException
+   */
   public List<CapabilityOperationRecord> getCapabilityOperations() throws IOException {
     return TransactionRunners.run(transactionRunner, context -> {
       StructuredTable capabilityTable = context.getTable(StoreDefinition.CapabilitiesStore.CAPABILITY_OPERATIONS);
@@ -159,7 +173,14 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
     }, IOException.class);
   }
 
-  @Override
+  /**
+   * Adds or update capability operations
+   *
+   * @param capability
+   * @param actionType
+   * @param config
+   * @throws IOException
+   */
   public void addOrUpdateCapabilityOperation(String capability, CapabilityAction actionType,
                                              CapabilityConfig config) throws IOException {
     TransactionRunners.run(transactionRunner, context -> {
@@ -172,7 +193,12 @@ public class CapabilityStatusStore implements CapabilityReader, CapabilityWriter
     }, IOException.class);
   }
 
-  @Override
+  /**
+   * Deletes capability operations
+   *
+   * @param capability
+   * @throws IOException
+   */
   public void deleteCapabilityOperation(String capability) throws IOException {
     TransactionRunners.run(transactionRunner, context -> {
       StructuredTable capabilityTable = context.getTable(StoreDefinition.CapabilitiesStore.CAPABILITY_OPERATIONS);
